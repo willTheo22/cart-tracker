@@ -1,0 +1,1528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Card Show Ledger — Profit / Loss Tracker</title>
+
+<!-- ============================================================
+     FONTS
+     Display : Barlow Condensed  -> slab-label / price-tag voice
+     Body    : Inter             -> quiet, legible UI text
+     Numerals: JetBrains Mono    -> tabular figures for money
+     ============================================================ -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+
+<!-- Chart.js (CDN) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+<style>
+/* ============================================================
+   1. DESIGN TOKENS
+   ============================================================ */
+:root{
+  /* Surfaces — deep space-blue, cooler than pure black */
+  --ink-900:#050912;
+  --ink-800:#0A0F22;
+  --glass:rgba(255,255,255,.045);
+  --glass-strong:rgba(255,255,255,.07);
+  --edge:rgba(255,255,255,.10);
+  --edge-soft:rgba(255,255,255,.06);
+
+  /* Text */
+  --text:#EAF1FF;
+  --text-dim:#93A6CC;
+  --text-faint:#5C6E94;
+
+  /* Cool electric spectrum — cyan through violet, no warm tones */
+  --holo-a:#22E9FF;   /* electric cyan */
+  --holo-b:#7B6CFF;   /* electric indigo */
+  --holo-c:#2F8FFF;   /* cool sky blue */
+
+  /* Slab label accent — icy teal instead of warm gold */
+  --gold:#4FF0D6;
+
+  /* Ledger signals — kept vivid so gain/loss still reads instantly */
+  --gain:#2DECA0;
+  --loss:#FF3D6E;
+
+  /* Glow — the "cooler" signature: soft neon bloom on key elements */
+  --glow-cyan:0 0 22px rgba(34,233,255,.35);
+  --glow-indigo:0 0 26px rgba(123,108,255,.4);
+
+  /* Geometry & motion */
+  --r-lg:22px;
+  --r-md:14px;
+  --r-sm:9px;
+  --ease:cubic-bezier(.22,.8,.28,1);
+  --pad:clamp(14px, 2.2vw, 26px);
+}
+
+/* ============================================================
+   2. BASE
+   ============================================================ */
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  min-height:100vh;
+  background:var(--ink-900);
+  color:var(--text);
+  font-family:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+  font-size:15px;
+  line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+
+/* Ambient backdrop: two soft foil blooms + a faint show-floor grid */
+.backdrop{
+  position:fixed; inset:0; z-index:-1; pointer-events:none;
+  background:
+    radial-gradient(60vw 60vw at 12% -8%, rgba(34,233,255,.18), transparent 62%),
+    radial-gradient(52vw 52vw at 92% 4%, rgba(123,108,255,.20), transparent 60%),
+    radial-gradient(70vw 50vw at 50% 110%, rgba(47,143,255,.12), transparent 65%),
+    var(--ink-900);
+}
+.backdrop::after{
+  content:""; position:absolute; inset:0;
+  background-image:
+    linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px);
+  background-size:56px 56px;
+  mask-image:radial-gradient(circle at 50% 30%, #000 25%, transparent 78%);
+}
+
+/* Shared glass panel */
+.panel{
+  background:var(--glass);
+  border:1px solid var(--edge);
+  border-radius:var(--r-lg);
+  backdrop-filter:blur(18px) saturate(140%);
+  -webkit-backdrop-filter:blur(18px) saturate(140%);
+  box-shadow:0 20px 50px -30px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.05);
+}
+
+/* Typographic utilities */
+.eyebrow{
+  font-family:'Barlow Condensed',sans-serif;
+  text-transform:uppercase;
+  letter-spacing:.18em;
+  font-weight:600;
+  font-size:12px;
+  color:var(--text-faint);
+}
+.num{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;}
+
+/* ============================================================
+   3. LAYOUT
+   ============================================================ */
+.wrap{
+  width:min(1240px,100%);
+  margin:0 auto;
+  padding:0 var(--pad) 72px;
+}
+
+/* ---- Top bar ---- */
+.topbar{
+  display:flex; flex-wrap:wrap; gap:16px;
+  align-items:center; justify-content:space-between;
+  padding:26px 0 22px;
+}
+.brand{display:flex;align-items:center;gap:14px;min-width:0;}
+.mark{
+  width:46px;height:46px;flex:none;border-radius:12px;
+  background:linear-gradient(140deg,var(--holo-a),var(--holo-b) 52%,var(--holo-c));
+  display:grid;place-items:center;
+  font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:22px;
+  color:#08111C; letter-spacing:.02em;
+  box-shadow:0 8px 24px -8px rgba(123,108,255,.7);
+}
+.brand h1{
+  margin:0; font-family:'Barlow Condensed',sans-serif;
+  font-size:clamp(26px,3.4vw,36px); font-weight:700;
+  letter-spacing:.03em; text-transform:uppercase; line-height:1;
+}
+.brand p{margin:3px 0 0;font-size:12.5px;color:var(--text-dim);}
+
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;}
+
+/* ---- Buttons ---- */
+.btn{
+  font-family:'Barlow Condensed',sans-serif;
+  text-transform:uppercase; letter-spacing:.1em; font-weight:600; font-size:14px;
+  color:var(--text);
+  background:var(--glass-strong);
+  border:1px solid var(--edge);
+  border-radius:var(--r-sm);
+  padding:9px 15px;
+  cursor:pointer;
+  transition:transform .18s var(--ease), background .18s var(--ease), border-color .18s var(--ease);
+}
+.btn:hover{background:rgba(255,255,255,.13);border-color:rgba(255,255,255,.24);transform:translateY(-2px);}
+.btn:active{transform:translateY(0);}
+.btn:focus-visible{outline:2px solid var(--holo-a);outline-offset:2px;}
+.btn.danger{color:var(--loss);border-color:rgba(255,92,124,.35);}
+.btn.danger:hover{background:rgba(255,92,124,.14);border-color:rgba(255,92,124,.6);}
+.btn.primary{
+  color:#031018;border-color:transparent;
+  background:linear-gradient(120deg,var(--holo-a),var(--holo-b));
+  box-shadow:0 10px 26px -12px rgba(34,233,255,.8);
+}
+.btn.primary:hover{filter:brightness(1.1);box-shadow:var(--glow-cyan),0 10px 26px -12px rgba(34,233,255,.8);}
+
+/* ============================================================
+   4. SIGNATURE: THE SLAB CARDS
+   Four totals rendered like graded-card slab labels — a stamped
+   header strip over a big mono figure, with a foil sheen sweep.
+   ============================================================ */
+.slabs{
+  display:grid; gap:16px; margin-bottom:22px;
+  grid-template-columns:repeat(auto-fit,minmax(215px,1fr));
+}
+.slab{
+  position:relative; overflow:hidden;
+  padding:0 0 20px;
+  border-radius:var(--r-md);
+  background:var(--glass);
+  border:1px solid var(--edge);
+  backdrop-filter:blur(18px) saturate(140%);
+  -webkit-backdrop-filter:blur(18px) saturate(140%);
+  transition:transform .3s var(--ease), border-color .3s var(--ease);
+}
+.slab:hover{transform:translateY(-4px);border-color:rgba(255,255,255,.22);box-shadow:var(--glow-indigo);}
+/* stamped label strip */
+.slab-label{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:11px 16px;
+  border-bottom:1px solid var(--edge-soft);
+  background:rgba(255,255,255,.035);
+}
+.slab-label .tag{
+  font-family:'Barlow Condensed',sans-serif;
+  text-transform:uppercase;letter-spacing:.16em;font-weight:600;font-size:12.5px;
+  color:var(--text-dim);
+}
+.slab-label .pip{width:7px;height:7px;border-radius:50%;background:var(--holo-a);flex:none;}
+.slab-body{padding:18px 16px 0;}
+.slab-value{
+  font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;
+  font-size:clamp(26px,3.5vw,34px); font-weight:700; letter-spacing:-.02em;
+  line-height:1.1; word-break:break-all;
+}
+.slab-sub{margin-top:6px;font-size:12px;color:var(--text-faint);}
+/* foil sheen */
+.slab::after{
+  content:"";position:absolute;top:0;bottom:0;width:45%;
+  left:-60%;
+  background:linear-gradient(100deg,transparent,rgba(255,255,255,.16),transparent);
+  transform:skewX(-18deg);
+  transition:left .75s var(--ease);
+  pointer-events:none;
+}
+.slab:hover::after{left:130%;}
+
+.slab.purchases .pip{background:var(--holo-c);}
+.slab.sales .pip{background:var(--holo-a);}
+.slab.supplies .pip{background:var(--gold);}
+.slab.net{border-color:rgba(255,255,255,.18);}
+.slab.net .slab-label{background:rgba(255,255,255,.06);}
+.value-gain{color:var(--gain);}
+.value-loss{color:var(--loss);}
+.value-neutral{color:var(--text);}
+
+/* ============================================================
+   5. SECTIONS
+   ============================================================ */
+.section{padding:var(--pad);margin-bottom:22px;}
+.section-head{
+  display:flex;flex-wrap:wrap;gap:12px;
+  align-items:center;justify-content:space-between;
+  margin-bottom:18px;
+}
+.section-head h2{
+  margin:0;font-family:'Barlow Condensed',sans-serif;
+  font-size:22px;font-weight:600;text-transform:uppercase;letter-spacing:.12em;
+}
+
+/* ---- Segmented control (chart range + ledger tabs) ---- */
+.segmented{
+  display:inline-flex;gap:4px;padding:4px;
+  background:rgba(0,0,0,.28);
+  border:1px solid var(--edge-soft);
+  border-radius:11px;
+}
+.seg{
+  font-family:'Barlow Condensed',sans-serif;
+  text-transform:uppercase;letter-spacing:.1em;font-weight:600;font-size:13.5px;
+  color:var(--text-dim);
+  background:transparent;border:0;border-radius:8px;
+  padding:7px 15px;cursor:pointer;
+  transition:color .2s var(--ease), background .2s var(--ease);
+}
+.seg:hover{color:var(--text);}
+.seg:focus-visible{outline:2px solid var(--holo-a);outline-offset:2px;}
+.seg.active{color:#07101C;background:linear-gradient(120deg,var(--holo-a),var(--holo-b));}
+
+/* ---- Chart ---- */
+.chart-shell{position:relative;height:min(46vh,380px);min-height:260px;}
+.chart-shell canvas{
+  filter:drop-shadow(0 0 14px rgba(34,233,255,.16)) drop-shadow(0 0 26px rgba(123,108,255,.10));
+}
+.chart-empty{
+  position:absolute;inset:0;display:none;
+  place-items:center;text-align:center;color:var(--text-faint);font-size:14px;
+}
+.chart-empty.show{display:grid;}
+
+/* ---- Forms ---- */
+.entry-form{
+  display:grid;gap:12px;
+  grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  align-items:end;
+  padding:16px;margin-bottom:18px;
+  background:rgba(0,0,0,.22);
+  border:1px solid var(--edge-soft);
+  border-radius:var(--r-md);
+}
+.field{display:flex;flex-direction:column;gap:6px;min-width:0;}
+.field label{
+  font-family:'Barlow Condensed',sans-serif;
+  text-transform:uppercase;letter-spacing:.14em;font-weight:600;font-size:11.5px;
+  color:var(--text-faint);
+}
+.field input, .field select{
+  width:100%;
+  font-family:'Inter',sans-serif;font-size:14px;color:var(--text);
+  background:rgba(255,255,255,.05);
+  border:1px solid var(--edge);
+  border-radius:var(--r-sm);
+  padding:10px 12px;
+  transition:border-color .2s var(--ease), background .2s var(--ease);
+}
+.field input[type="number"]{font-family:'JetBrains Mono',monospace;}
+.field input::placeholder{color:var(--text-faint);}
+.field input:focus, .field select:focus{
+  outline:none;border-color:var(--holo-a);background:rgba(34,233,255,.08);
+}
+.field select option{background:var(--ink-800);color:var(--text);}
+.form-actions{display:flex;gap:8px;}
+.form-actions .btn{width:100%;padding:11px 15px;}
+
+/* ---- Photo picker (in forms) ---- */
+.field-photo{justify-content:flex-start;}
+.photo-picker{display:flex;align-items:center;gap:10px;height:41px;}
+.photo-btn{
+  font-family:'Barlow Condensed',sans-serif;text-transform:uppercase;
+  letter-spacing:.1em;font-weight:600;font-size:13px;
+  color:var(--text-dim);
+  background:rgba(255,255,255,.05);
+  border:1px dashed var(--edge);
+  border-radius:var(--r-sm);
+  padding:10px 14px;cursor:pointer;white-space:nowrap;
+  transition:all .18s var(--ease);
+}
+.photo-btn:hover{color:var(--text);border-color:var(--holo-a);background:rgba(34,233,255,.08);}
+.photo-preview{position:relative;flex:none;width:41px;height:41px;}
+.photo-preview img{
+  width:100%;height:100%;object-fit:cover;border-radius:8px;
+  border:1px solid var(--edge);display:block;
+}
+.photo-remove{
+  position:absolute;top:-7px;right:-7px;width:19px;height:19px;
+  border-radius:50%;border:1px solid var(--edge);
+  background:var(--ink-800);color:var(--loss);
+  font-size:13px;line-height:1;cursor:pointer;display:grid;place-items:center;
+  padding:0;transition:transform .15s var(--ease);
+}
+.photo-remove:hover{transform:scale(1.12);}
+
+/* ---- Table photo thumbnails ---- */
+.thumb-cell{width:52px;}
+.thumb{
+  width:40px;height:40px;object-fit:cover;border-radius:8px;
+  border:1px solid var(--edge);cursor:pointer;display:block;
+  transition:transform .18s var(--ease), border-color .18s var(--ease);
+}
+.thumb:hover{transform:scale(1.08);border-color:var(--holo-a);}
+.thumb-none{
+  width:40px;height:40px;border-radius:8px;
+  border:1px dashed var(--edge-soft);
+  display:grid;place-items:center;color:var(--text-faint);font-size:11px;
+}
+
+/* ---- Lightbox ---- */
+.lightbox{
+  position:fixed;inset:0;z-index:200;
+  background:rgba(4,6,12,.92);backdrop-filter:blur(6px);
+  display:flex;align-items:center;justify-content:center;
+  padding:28px;
+  animation:lb-in .2s var(--ease);
+}
+.lightbox[hidden]{display:none;}
+@keyframes lb-in{from{opacity:0;}to{opacity:1;}}
+.lightbox img{
+  max-width:100%;max-height:100%;border-radius:14px;
+  box-shadow:0 30px 80px -20px rgba(0,0,0,.9);
+}
+.lightbox-close{
+  position:absolute;top:20px;right:20px;
+  width:42px;height:42px;border-radius:50%;
+  background:var(--glass-strong);border:1px solid var(--edge);
+  color:var(--text);font-size:22px;line-height:1;cursor:pointer;
+  display:grid;place-items:center;
+  transition:background .18s var(--ease), transform .18s var(--ease);
+}
+.lightbox-close:hover{background:rgba(255,255,255,.16);transform:rotate(90deg);}
+
+/* ---- Tables ---- */
+.table-scroll{overflow-x:auto;border-radius:var(--r-md);border:1px solid var(--edge-soft);}
+table{width:100%;border-collapse:collapse;min-width:640px;}
+thead th{
+  position:sticky;top:0;
+  font-family:'Barlow Condensed',sans-serif;
+  text-transform:uppercase;letter-spacing:.14em;font-weight:600;font-size:11.5px;
+  color:var(--text-faint);text-align:left;
+  padding:11px 14px;
+  background:rgba(255,255,255,.05);
+  border-bottom:1px solid var(--edge-soft);
+  white-space:nowrap;
+}
+tbody td{
+  padding:12px 14px;font-size:14px;
+  border-bottom:1px solid rgba(255,255,255,.04);
+  vertical-align:top;
+}
+tbody tr{transition:background .18s var(--ease);}
+tbody tr:hover{background:rgba(255,255,255,.045);}
+tbody tr:last-child td{border-bottom:0;}
+.cell-num{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.cell-note{color:var(--text-dim);font-size:13px;max-width:260px;}
+.total-in{color:var(--gain);}
+.total-out{color:var(--loss);}
+.row-del{
+  background:transparent;border:1px solid transparent;border-radius:7px;
+  color:var(--text-faint);cursor:pointer;padding:4px 9px;font-size:15px;line-height:1;
+  transition:all .18s var(--ease);
+}
+.row-del:hover{color:var(--loss);border-color:rgba(255,92,124,.4);background:rgba(255,92,124,.1);}
+.row-del:focus-visible{outline:2px solid var(--loss);outline-offset:2px;}
+.empty-row td{text-align:center;color:var(--text-faint);padding:34px 14px;font-size:14px;}
+
+/* Ledger footer total */
+.ledger-foot{
+  display:flex;justify-content:flex-end;align-items:baseline;gap:12px;
+  padding:14px 4px 0;
+}
+.ledger-foot .amount{font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:700;}
+
+/* ---- Stats ---- */
+.stats{
+  display:grid;gap:12px;
+  grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+}
+.stat{
+  padding:15px 16px;border-radius:var(--r-md);
+  background:rgba(255,255,255,.035);
+  border:1px solid var(--edge-soft);
+  transition:border-color .25s var(--ease), transform .25s var(--ease);
+}
+.stat:hover{border-color:rgba(255,255,255,.2);transform:translateY(-3px);}
+.stat .k{
+  font-family:'Barlow Condensed',sans-serif;
+  text-transform:uppercase;letter-spacing:.14em;font-weight:600;font-size:11.5px;
+  color:var(--text-faint);
+}
+.stat .v{
+  margin-top:7px;
+  font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;
+  font-size:22px;font-weight:700;letter-spacing:-.02em;
+}
+.stat .m{margin-top:3px;font-size:11.5px;color:var(--text-faint);}
+
+/* ---- Toasts ---- */
+.toasts{
+  position:fixed;right:16px;bottom:16px;z-index:99;
+  display:flex;flex-direction:column;gap:9px;align-items:flex-end;
+}
+.toast{
+  padding:11px 16px;border-radius:11px;font-size:13.5px;
+  background:rgba(14,20,36,.94);
+  border:1px solid var(--edge);
+  backdrop-filter:blur(12px);
+  box-shadow:0 14px 34px -16px rgba(0,0,0,.95);
+  animation:toast-in .3s var(--ease);
+  max-width:min(360px,80vw);
+}
+.toast.ok{border-color:rgba(61,220,151,.45);}
+.toast.warn{border-color:rgba(255,92,124,.45);}
+@keyframes toast-in{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:none;}}
+
+footer.credit{
+  text-align:center;color:var(--text-faint);font-size:12px;padding-top:6px;
+}
+footer.credit strong{color:var(--text-dim);font-weight:500;}
+
+/* ---- Responsive ---- */
+@media (max-width:680px){
+  .topbar{padding:20px 0 16px;}
+  .toolbar{width:100%;}
+  .toolbar .btn{flex:1 1 auto;}
+  .section-head{align-items:flex-start;}
+  .segmented{width:100%;}
+  .seg{flex:1;padding:8px 6px;}
+}
+
+/* ---- Accessibility: honor reduced motion ---- */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important;}
+  .slab::after{display:none;}
+}
+</style>
+</head>
+
+<body>
+<div class="backdrop" aria-hidden="true"></div>
+
+<div class="wrap">
+
+  <!-- =========================== TOP BAR =========================== -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="mark" aria-hidden="true">CS</div>
+      <div>
+        <h1>Card Show Ledger</h1>
+        <p>Buys, sells, and supplies — one table at a time.</p>
+      </div>
+    </div>
+    <div class="toolbar">
+      <button class="btn" id="btnCsv">Export CSV</button>
+      <button class="btn" id="btnJson">Export JSON</button>
+      <button class="btn" id="btnImport">Import data</button>
+      <button class="btn danger" id="btnClear">Clear all</button>
+      <input type="file" id="fileInput" accept="application/json,.json" hidden />
+    </div>
+  </header>
+
+  <!-- =========================== SLAB TOTALS =========================== -->
+  <section class="slabs" aria-label="Running totals">
+    <article class="slab purchases">
+      <div class="slab-label"><span class="tag">Card purchases</span><span class="pip"></span></div>
+      <div class="slab-body">
+        <div class="slab-value value-neutral" id="sumPurchases">$0.00</div>
+        <div class="slab-sub" id="subPurchases">No buys logged</div>
+      </div>
+    </article>
+
+    <article class="slab sales">
+      <div class="slab-label"><span class="tag">Card sales</span><span class="pip"></span></div>
+      <div class="slab-body">
+        <div class="slab-value value-neutral" id="sumSales">$0.00</div>
+        <div class="slab-sub" id="subSales">No sales logged</div>
+      </div>
+    </article>
+
+    <article class="slab supplies">
+      <div class="slab-label"><span class="tag">Supplies</span><span class="pip"></span></div>
+      <div class="slab-body">
+        <div class="slab-value value-neutral" id="sumSupplies">$0.00</div>
+        <div class="slab-sub" id="subSupplies">No supplies logged</div>
+      </div>
+    </article>
+
+    <article class="slab net">
+      <div class="slab-label"><span class="tag">Profit / Loss</span><span class="pip"></span></div>
+      <div class="slab-body">
+        <div class="slab-value value-neutral" id="sumNet">$0.00</div>
+        <div class="slab-sub" id="subNet">Sales − purchases − supplies</div>
+      </div>
+    </article>
+  </section>
+
+  <!-- =========================== CHART =========================== -->
+  <section class="panel section" aria-label="Performance chart">
+    <div class="section-head">
+      <h2>Money in, money out</h2>
+      <div class="segmented" role="tablist" aria-label="Chart range">
+        <button class="seg active" data-range="daily" role="tab" aria-selected="true">Daily</button>
+        <button class="seg" data-range="weekly" role="tab" aria-selected="false">Weekly</button>
+        <button class="seg" data-range="monthly" role="tab" aria-selected="false">Monthly</button>
+      </div>
+    </div>
+    <div class="chart-shell">
+      <canvas id="chart" aria-label="Revenue, expenses and profit over time" role="img"></canvas>
+      <div class="chart-empty" id="chartEmpty">Log a purchase or a sale and the chart fills in here.</div>
+    </div>
+  </section>
+
+  <!-- =========================== LEDGERS =========================== -->
+  <section class="panel section" aria-label="Ledger entries">
+    <div class="section-head">
+      <h2>Ledger</h2>
+      <div class="segmented" role="tablist" aria-label="Ledger type">
+        <button class="seg active" data-tab="purchases" role="tab" aria-selected="true">Purchases</button>
+        <button class="seg" data-tab="sales" role="tab" aria-selected="false">Sales</button>
+        <button class="seg" data-tab="supplies" role="tab" aria-selected="false">Supplies</button>
+      </div>
+    </div>
+
+    <!-- ---------- Purchases ---------- -->
+    <div class="tab-panel" data-panel="purchases">
+      <form class="entry-form" id="formPurchases" autocomplete="off">
+        <div class="field">
+          <label for="pName">Card name</label>
+          <input id="pName" name="name" type="text" placeholder="1998 Kobe Bryant refractor" />
+        </div>
+        <div class="field">
+          <label for="pPrice">Purchase price ($)</label>
+          <input id="pPrice" name="price" type="number" step="0.01" min="0" placeholder="0.00" />
+        </div>
+        <div class="field">
+          <label for="pQty">Quantity</label>
+          <input id="pQty" name="qty" type="number" step="1" min="1" value="1" />
+        </div>
+        <div class="field">
+          <label for="pDate">Date</label>
+          <input id="pDate" name="date" type="date" />
+        </div>
+        <div class="field">
+          <label for="pNotes">Notes</label>
+          <input id="pNotes" name="notes" type="text" placeholder="Optional" />
+        </div>
+        <div class="field field-photo">
+          <label for="pPhotoInput">Photo</label>
+          <div class="photo-picker" id="pPhotoPicker">
+            <input id="pPhotoInput" type="file" accept="image/*" capture="environment" hidden />
+            <button type="button" class="photo-btn" id="pPhotoBtn">Add photo</button>
+            <div class="photo-preview" id="pPhotoPreview" hidden>
+              <img alt="Selected photo preview" />
+              <button type="button" class="photo-remove" aria-label="Remove photo">&times;</button>
+            </div>
+          </div>
+        </div>
+        <div class="form-actions"><button class="btn primary" type="submit">Add purchase</button></div>
+      </form>
+
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Photo</th><th>Card</th><th>Date</th><th>Qty</th><th>Unit price</th><th>Total</th><th>Notes</th><th></th></tr>
+          </thead>
+          <tbody id="tbodyPurchases"></tbody>
+        </table>
+      </div>
+      <div class="ledger-foot">
+        <span class="eyebrow">Total spent on cards</span>
+        <span class="amount total-out" id="footPurchases">$0.00</span>
+      </div>
+    </div>
+
+    <!-- ---------- Sales ---------- -->
+    <div class="tab-panel" data-panel="sales" hidden>
+      <form class="entry-form" id="formSales" autocomplete="off">
+        <div class="field">
+          <label for="sName">Card name</label>
+          <input id="sName" name="name" type="text" placeholder="2003 LeBron James rookie" />
+        </div>
+        <div class="field">
+          <label for="sPrice">Sale price ($)</label>
+          <input id="sPrice" name="price" type="number" step="0.01" min="0" placeholder="0.00" />
+        </div>
+        <div class="field">
+          <label for="sQty">Quantity</label>
+          <input id="sQty" name="qty" type="number" step="1" min="1" value="1" />
+        </div>
+        <div class="field">
+          <label for="sDate">Date</label>
+          <input id="sDate" name="date" type="date" />
+        </div>
+        <div class="field">
+          <label for="sNotes">Notes</label>
+          <input id="sNotes" name="notes" type="text" placeholder="Optional" />
+        </div>
+        <div class="field field-photo">
+          <label for="sPhotoInput">Photo</label>
+          <div class="photo-picker" id="sPhotoPicker">
+            <input id="sPhotoInput" type="file" accept="image/*" capture="environment" hidden />
+            <button type="button" class="photo-btn" id="sPhotoBtn">Add photo</button>
+            <div class="photo-preview" id="sPhotoPreview" hidden>
+              <img alt="Selected photo preview" />
+              <button type="button" class="photo-remove" aria-label="Remove photo">&times;</button>
+            </div>
+          </div>
+        </div>
+        <div class="form-actions"><button class="btn primary" type="submit">Add sale</button></div>
+      </form>
+
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Photo</th><th>Card</th><th>Date</th><th>Qty</th><th>Unit price</th><th>Total</th><th>Notes</th><th></th></tr>
+          </thead>
+          <tbody id="tbodySales"></tbody>
+        </table>
+      </div>
+      <div class="ledger-foot">
+        <span class="eyebrow">Total sales revenue</span>
+        <span class="amount total-in" id="footSales">$0.00</span>
+      </div>
+    </div>
+
+    <!-- ---------- Supplies ---------- -->
+    <div class="tab-panel" data-panel="supplies" hidden>
+      <form class="entry-form" id="formSupplies" autocomplete="off">
+        <div class="field">
+          <label for="uName">Item name</label>
+          <input id="uName" name="name" type="text" list="supplyList" placeholder="Toploaders (100ct)" />
+          <datalist id="supplyList">
+            <option value="Show registration"></option>
+            <option value="Table fee"></option>
+            <option value="Sleeves"></option>
+            <option value="Toploaders"></option>
+            <option value="Card savers"></option>
+            <option value="Tape"></option>
+            <option value="Bags"></option>
+            <option value="Display supplies"></option>
+            <option value="Shipping supplies"></option>
+            <option value="Miscellaneous"></option>
+          </datalist>
+        </div>
+        <div class="field">
+          <label for="uType">Category</label>
+          <select id="uType" name="type">
+            <option>Card show registration fee</option>
+            <option>Sleeves</option>
+            <option>Toploaders</option>
+            <option>Card savers</option>
+            <option>Tape</option>
+            <option>Bags</option>
+            <option>Display supplies</option>
+            <option>Shipping supplies</option>
+            <option>Miscellaneous</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="uCost">Cost ($)</label>
+          <input id="uCost" name="price" type="number" step="0.01" min="0" placeholder="0.00" />
+        </div>
+        <div class="field">
+          <label for="uDate">Date</label>
+          <input id="uDate" name="date" type="date" />
+        </div>
+        <div class="form-actions"><button class="btn primary" type="submit">Add supply</button></div>
+      </form>
+
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Item</th><th>Category</th><th>Date</th><th>Cost</th><th></th></tr>
+          </thead>
+          <tbody id="tbodySupplies"></tbody>
+        </table>
+      </div>
+      <div class="ledger-foot">
+        <span class="eyebrow">Total supply expenses</span>
+        <span class="amount total-out" id="footSupplies">$0.00</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- =========================== STATS =========================== -->
+  <section class="panel section" aria-label="Statistics">
+    <div class="section-head"><h2>The numbers</h2></div>
+    <div class="stats">
+      <div class="stat"><div class="k">Cards bought</div><div class="v" id="stBought">0</div><div class="m">Units acquired</div></div>
+      <div class="stat"><div class="k">Cards sold</div><div class="v" id="stSold">0</div><div class="m">Units moved</div></div>
+      <div class="stat"><div class="k">Avg purchase price</div><div class="v" id="stAvgBuy">$0.00</div><div class="m">Per card</div></div>
+      <div class="stat"><div class="k">Avg sale price</div><div class="v" id="stAvgSell">$0.00</div><div class="m">Per card</div></div>
+      <div class="stat"><div class="k">Highest sale</div><div class="v" id="stTopSale">$0.00</div><div class="m" id="stTopSaleName">—</div></div>
+      <div class="stat"><div class="k">Biggest purchase</div><div class="v" id="stTopBuy">$0.00</div><div class="m" id="stTopBuyName">—</div></div>
+      <div class="stat"><div class="k">ROI</div><div class="v" id="stRoi">—</div><div class="m">Return on card spend</div></div>
+      <div class="stat"><div class="k">Margin per card sold</div><div class="v" id="stMargin">—</div><div class="m">Profit ÷ cards sold</div></div>
+    </div>
+  </section>
+
+  <footer class="credit">
+    Everything stays on this device. <strong id="storageNote">Saved to local storage.</strong>
+  </footer>
+</div>
+
+<!-- Fullscreen photo viewer -->
+<div class="lightbox" id="lightbox" hidden>
+  <button class="lightbox-close" id="lightboxClose" aria-label="Close photo">&times;</button>
+  <img id="lightboxImg" alt="Card photo, full size" />
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   STORAGE LAYER
+   Uses localStorage when the page can reach it (the normal case
+   when you open the file from your own folder). Falls back to an
+   in-memory store inside sandboxed previews so nothing throws.
+   ============================================================ */
+const Store = (() => {
+  const KEY = "cardShowLedger.v1";
+  let usable = true;
+  try {
+    const probe = "__probe__";
+    window.localStorage.setItem(probe, "1");
+    window.localStorage.removeItem(probe);
+  } catch (e) { usable = false; }
+
+  let memory = null;
+
+  return {
+    persistent: usable,
+    load() {
+      try {
+        const raw = usable ? window.localStorage.getItem(KEY) : memory;
+        return raw ? JSON.parse(raw) : null;
+      } catch (e) { return null; }
+    },
+    save(data) {
+      const raw = JSON.stringify(data);
+      if (usable) {
+        try { window.localStorage.setItem(KEY, raw); }
+        catch (e) { toast("Storage is full — data kept for this session only.", "warn"); }
+      } else { memory = raw; }
+    },
+    wipe() {
+      if (usable) { try { window.localStorage.removeItem(KEY); } catch (e) {} }
+      memory = null;
+    }
+  };
+})();
+
+/* ============================================================
+   STATE
+   purchases / sales : {id, name, price, qty, date, notes}
+   supplies          : {id, name, type, price, date}
+   ============================================================ */
+let state = { purchases: [], sales: [], supplies: [] };
+
+function loadState() {
+  const saved = Store.load();
+  if (saved && typeof saved === "object") {
+    state = {
+      purchases: Array.isArray(saved.purchases) ? saved.purchases : [],
+      sales:     Array.isArray(saved.sales)     ? saved.sales     : [],
+      supplies:  Array.isArray(saved.supplies)  ? saved.supplies  : []
+    };
+  }
+}
+function persist() { Store.save(state); }
+
+/* ============================================================
+   HELPERS
+   ============================================================ */
+const $  = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+const money = n => (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString("en-US", {
+  minimumFractionDigits: 2, maximumFractionDigits: 2
+});
+
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+/** Parse a YYYY-MM-DD input value as a *local* date (avoids UTC shift). */
+function parseDate(str) {
+  if (!str) return null;
+  const [y, m, d] = str.split("-").map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d);
+}
+function fmtDate(str) {
+  const d = parseDate(str);
+  return d ? d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
+}
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+/** Escape user text before it touches innerHTML. */
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+const lineTotal = e => (Number(e.price) || 0) * (Number(e.qty) || 1);
+const sum = (arr, fn) => arr.reduce((t, x) => t + fn(x), 0);
+
+const totals = () => {
+  const purchases = sum(state.purchases, lineTotal);
+  const sales     = sum(state.sales, lineTotal);
+  const supplies  = sum(state.supplies, e => Number(e.price) || 0);
+  return { purchases, sales, supplies, net: sales - purchases - supplies };
+};
+
+/* Toast notifications */
+function toast(msg, kind = "ok") {
+  const el = document.createElement("div");
+  el.className = "toast " + kind;
+  el.textContent = msg;
+  $("#toasts").appendChild(el);
+  setTimeout(() => {
+    el.style.transition = "opacity .3s, transform .3s";
+    el.style.opacity = "0";
+    el.style.transform = "translateY(8px)";
+    setTimeout(() => el.remove(), 320);
+  }, 3200);
+}
+
+/* ============================================================
+   SLAB TOTALS
+   ============================================================ */
+function renderTotals() {
+  const t = totals();
+  const cardsBought = sum(state.purchases, e => Number(e.qty) || 0);
+  const cardsSold   = sum(state.sales, e => Number(e.qty) || 0);
+
+  $("#sumPurchases").textContent = money(t.purchases);
+  $("#sumSales").textContent     = money(t.sales);
+  $("#sumSupplies").textContent  = money(t.supplies);
+  $("#sumNet").textContent       = money(t.net);
+
+  $("#subPurchases").textContent = state.purchases.length
+    ? `${state.purchases.length} entr${state.purchases.length === 1 ? "y" : "ies"} · ${cardsBought} card${cardsBought === 1 ? "" : "s"}`
+    : "No buys logged";
+  $("#subSales").textContent = state.sales.length
+    ? `${state.sales.length} entr${state.sales.length === 1 ? "y" : "ies"} · ${cardsSold} card${cardsSold === 1 ? "" : "s"}`
+    : "No sales logged";
+  $("#subSupplies").textContent = state.supplies.length
+    ? `${state.supplies.length} item${state.supplies.length === 1 ? "" : "s"} logged`
+    : "No supplies logged";
+  $("#subNet").textContent = t.net > 0 ? "In the green" : t.net < 0 ? "In the red" : "Sales − purchases − supplies";
+
+  // Color coding: green on profit, red on loss
+  const net = $("#sumNet");
+  net.classList.remove("value-gain", "value-loss", "value-neutral");
+  net.classList.add(t.net > 0 ? "value-gain" : t.net < 0 ? "value-loss" : "value-neutral");
+
+  $("#footPurchases").textContent = money(t.purchases);
+  $("#footSales").textContent     = money(t.sales);
+  $("#footSupplies").textContent  = money(t.supplies);
+}
+
+/* ============================================================
+   TABLES
+   ============================================================ */
+function sortedByDate(arr) {
+  return arr.slice().sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+}
+
+function renderCardTable(kind) {
+  const tbody = $(kind === "purchases" ? "#tbodyPurchases" : "#tbodySales");
+  const rows = sortedByDate(state[kind]);
+  const totalClass = kind === "sales" ? "total-in" : "total-out";
+
+  if (!rows.length) {
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="8">Nothing here yet — add your first ${
+      kind === "sales" ? "sale" : "purchase"} with the form above.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = rows.map(e => `
+    <tr>
+      <td class="thumb-cell">${photoCell(e, kind)}</td>
+      <td>${esc(e.name)}</td>
+      <td class="cell-num">${fmtDate(e.date)}</td>
+      <td class="cell-num">${Number(e.qty) || 1}</td>
+      <td class="cell-num">${money(Number(e.price) || 0)}</td>
+      <td class="cell-num ${totalClass}">${money(lineTotal(e))}</td>
+      <td class="cell-note">${esc(e.notes || "")}</td>
+      <td><button class="row-del" data-kind="${kind}" data-id="${e.id}"
+            aria-label="Remove ${esc(e.name)}" title="Remove">&times;</button></td>
+    </tr>`).join("");
+}
+
+/** Renders either a clickable thumbnail or a placeholder box for the photo column. */
+function photoCell(entry, kind) {
+  if (!entry.photo) return `<div class="thumb-none">—</div>`;
+  return `<img class="thumb" src="${entry.photo}" data-kind="${kind}" data-id="${entry.id}"
+            alt="Photo of ${esc(entry.name)}" />`;
+}
+
+function renderSupplyTable() {
+  const tbody = $("#tbodySupplies");
+  const rows = sortedByDate(state.supplies);
+
+  if (!rows.length) {
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="5">No supplies logged — sleeves, toploaders, tape, and shipping go here.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = rows.map(e => `
+    <tr>
+      <td>${esc(e.name)}</td>
+      <td>${esc(e.type || "Miscellaneous")}</td>
+      <td class="cell-num">${fmtDate(e.date)}</td>
+      <td class="cell-num total-out">${money(Number(e.price) || 0)}</td>
+      <td><button class="row-del" data-kind="supplies" data-id="${e.id}"
+            aria-label="Remove ${esc(e.name)}" title="Remove">&times;</button></td>
+    </tr>`).join("");
+}
+
+/* Delete handling (event delegation) */
+document.addEventListener("click", ev => {
+  const btn = ev.target.closest(".row-del");
+  if (!btn) return;
+  const { kind, id } = btn.dataset;
+  state[kind] = state[kind].filter(e => e.id !== id);
+  persist();
+  renderAll();
+  toast("Entry removed.");
+});
+
+/* Photo lightbox: tap a thumbnail to view it full-size */
+document.addEventListener("click", ev => {
+  const thumb = ev.target.closest(".thumb");
+  if (!thumb) return;
+  $("#lightboxImg").src = thumb.src;
+  $("#lightbox").hidden = false;
+});
+function closeLightbox() { $("#lightbox").hidden = true; $("#lightboxImg").src = ""; }
+$("#lightboxClose").addEventListener("click", closeLightbox);
+$("#lightbox").addEventListener("click", ev => { if (ev.target.id === "lightbox") closeLightbox(); });
+document.addEventListener("keydown", ev => { if (ev.key === "Escape") closeLightbox(); });
+
+/* ============================================================
+   STATISTICS
+   ============================================================ */
+function renderStats() {
+  const t = totals();
+  const bought = sum(state.purchases, e => Number(e.qty) || 0);
+  const sold   = sum(state.sales, e => Number(e.qty) || 0);
+
+  $("#stBought").textContent = bought.toLocaleString();
+  $("#stSold").textContent   = sold.toLocaleString();
+  $("#stAvgBuy").textContent  = bought ? money(t.purchases / bought) : "$0.00";
+  $("#stAvgSell").textContent = sold   ? money(t.sales / sold)       : "$0.00";
+
+  // Highest single sale / biggest single purchase, by line total
+  const topSale = state.sales.reduce((best, e) => lineTotal(e) > (best ? lineTotal(best) : -1) ? e : best, null);
+  const topBuy  = state.purchases.reduce((best, e) => lineTotal(e) > (best ? lineTotal(best) : -1) ? e : best, null);
+
+  $("#stTopSale").textContent     = topSale ? money(lineTotal(topSale)) : "$0.00";
+  $("#stTopSaleName").textContent = topSale ? topSale.name : "—";
+  $("#stTopBuy").textContent      = topBuy ? money(lineTotal(topBuy)) : "$0.00";
+  $("#stTopBuyName").textContent  = topBuy ? topBuy.name : "—";
+
+  // ROI = ((sales − purchases − supplies) / purchases) × 100
+  const roiEl = $("#stRoi");
+  roiEl.classList.remove("value-gain", "value-loss");
+  if (t.purchases > 0) {
+    const roi = (t.net / t.purchases) * 100;
+    roiEl.textContent = (roi > 0 ? "+" : "") + roi.toFixed(1) + "%";
+    roiEl.classList.add(roi >= 0 ? "value-gain" : "value-loss");
+  } else {
+    roiEl.textContent = "—";
+  }
+
+  // Margin per card sold
+  const marginEl = $("#stMargin");
+  marginEl.classList.remove("value-gain", "value-loss");
+  if (sold > 0) {
+    const m = t.net / sold;
+    marginEl.textContent = money(m);
+    marginEl.classList.add(m >= 0 ? "value-gain" : "value-loss");
+  } else {
+    marginEl.textContent = "—";
+  }
+}
+
+/* ============================================================
+   CHART
+   Bars for revenue and expenses, a line for profit, bucketed by
+   day / ISO week / month.
+   ============================================================ */
+let chart = null;
+let range = "daily";
+
+/** Bucket key + human label for a date under the active range. */
+function bucketOf(dateStr, mode) {
+  const d = parseDate(dateStr);
+  if (!d) return null;
+
+  if (mode === "daily") {
+    return { key: dateStr, label: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }), sort: dateStr };
+  }
+  if (mode === "weekly") {
+    // Snap to the Monday that starts this week
+    const start = new Date(d);
+    const dow = (start.getDay() + 6) % 7; // Mon = 0
+    start.setDate(start.getDate() - dow);
+    const key = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
+    return { key, label: "Wk " + start.toLocaleDateString("en-US", { month: "short", day: "numeric" }), sort: key };
+  }
+  const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  return { key, label: d.toLocaleDateString("en-US", { month: "short", year: "numeric" }), sort: key + "-01" };
+}
+
+function buildSeries(mode) {
+  const buckets = new Map();
+
+  const add = (dateStr, field, amount) => {
+    const b = bucketOf(dateStr, mode);
+    if (!b) return;
+    if (!buckets.has(b.key)) buckets.set(b.key, { label: b.label, sort: b.sort, revenue: 0, expenses: 0 });
+    buckets.get(b.key)[field] += amount;
+  };
+
+  state.sales.forEach(e => add(e.date, "revenue", lineTotal(e)));
+  state.purchases.forEach(e => add(e.date, "expenses", lineTotal(e)));
+  state.supplies.forEach(e => add(e.date, "expenses", Number(e.price) || 0));
+
+  const ordered = Array.from(buckets.values()).sort((a, b) => a.sort.localeCompare(b.sort));
+  return {
+    labels:   ordered.map(b => b.label),
+    revenue:  ordered.map(b => +b.revenue.toFixed(2)),
+    expenses: ordered.map(b => +b.expenses.toFixed(2)),
+    profit:   ordered.map(b => +(b.revenue - b.expenses).toFixed(2))
+  };
+}
+
+function renderChart() {
+  const data = buildSeries(range);
+  const empty = data.labels.length === 0;
+  $("#chartEmpty").classList.toggle("show", empty);
+  $("#chart").style.opacity = empty ? "0" : "1";
+
+  const grid = "rgba(255,255,255,.06)";
+  const tick = "#93A6CC";
+
+  // Scriptable gradients — recomputed against the live chart area so bars
+  // fade from a solid neon top edge into the dark background, per Chart.js's
+  // documented gradient pattern (falls back to a flat color before layout).
+  const barGradient = (top, bottom) => (context) => {
+    const { chart } = context;
+    const { ctx, chartArea } = chart;
+    if (!chartArea) return top;
+    const g = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+    g.addColorStop(0, top);
+    g.addColorStop(1, bottom);
+    return g;
+  };
+
+  const datasets = [
+    {
+      type: "bar", label: "Revenue", data: data.revenue,
+      backgroundColor: barGradient("rgba(34,233,255,.85)", "rgba(34,233,255,.06)"),
+      borderColor: "#22E9FF", borderWidth: 1.5, borderRadius: 7, borderSkipped: false, order: 3
+    },
+    {
+      type: "bar", label: "Expenses", data: data.expenses,
+      backgroundColor: barGradient("rgba(123,108,255,.75)", "rgba(123,108,255,.06)"),
+      borderColor: "#7B6CFF", borderWidth: 1.5, borderRadius: 7, borderSkipped: false, order: 3
+    },
+    {
+      type: "line", label: "Profit / loss", data: data.profit,
+      borderColor: "#4FF0D6",
+      backgroundColor: barGradient("rgba(79,240,214,.30)", "rgba(79,240,214,0)"),
+      borderWidth: 3, tension: .4, fill: true, order: 1,
+      pointRadius: 4, pointHoverRadius: 7,
+      pointBackgroundColor: ctx => (ctx.raw >= 0 ? "#2DECA0" : "#FF3D6E"),
+      pointBorderColor: "#0A0F22", pointBorderWidth: 2
+    }
+  ];
+
+  if (chart) {
+    chart.data.labels = data.labels;
+    chart.data.datasets.forEach((ds, i) => { ds.data = datasets[i].data; });
+    chart.update();
+    return;
+  }
+
+  chart = new Chart($("#chart").getContext("2d"), {
+    data: { labels: data.labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: {
+          labels: {
+            color: "#EAF1FF", usePointStyle: true, pointStyle: "rectRounded",
+            boxWidth: 10, padding: 18,
+            font: { family: "Inter, sans-serif", size: 12.5 }
+          }
+        },
+        tooltip: {
+          backgroundColor: "rgba(6,10,20,.96)",
+          borderColor: "rgba(34,233,255,.25)", borderWidth: 1,
+          titleColor: "#EAF1FF", bodyColor: "#B9C6E6",
+          padding: 12, cornerRadius: 10, displayColors: true,
+          titleFont: { family: "Inter, sans-serif", weight: "600" },
+          bodyFont: { family: "JetBrains Mono, monospace", size: 12 },
+          callbacks: { label: c => ` ${c.dataset.label}: ${money(c.raw)}` }
+        }
+      },
+      scales: {
+        x: { grid: { color: grid, drawBorder: false }, ticks: { color: tick, font: { family: "Inter, sans-serif", size: 11.5 } } },
+        y: {
+          grid: { color: grid, drawBorder: false },
+          ticks: {
+            color: tick, font: { family: "JetBrains Mono, monospace", size: 11 },
+            callback: v => (v < 0 ? "-$" : "$") + Math.abs(v).toLocaleString()
+          }
+        }
+      },
+      animation: { duration: 650, easing: "easeOutQuart" }
+    }
+  });
+}
+
+/* ============================================================
+   PHOTOS
+   Selected images are downscaled and re-compressed on-device
+   before they're stored, so a show day's worth of photos doesn't
+   overrun local storage's few-megabyte limit.
+   ============================================================ */
+const photoDraft = { purchases: null, sales: null };
+
+function compressImage(file, maxDim = 860, quality = 0.7) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          if (width >= height) { height = Math.round(height * (maxDim / width)); width = maxDim; }
+          else { width = Math.round(width * (maxDim / height)); height = maxDim; }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width; canvas.height = height;
+        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = () => reject(new Error("Couldn't read that image."));
+      img.src = reader.result;
+    };
+    reader.onerror = () => reject(new Error("Couldn't read that file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+/** Wires the Add-photo button, hidden file input, preview, and remove button for one form. */
+function bindPhotoPicker(prefix, kind) {
+  const input     = $(`#${prefix}PhotoInput`);
+  const addBtn    = $(`#${prefix}PhotoBtn`);
+  const preview   = $(`#${prefix}PhotoPreview`);
+  const img       = preview.querySelector("img");
+  const removeBtn = preview.querySelector(".photo-remove");
+
+  addBtn.addEventListener("click", () => input.click());
+
+  input.addEventListener("change", async () => {
+    const file = input.files[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { toast("That doesn't look like an image.", "warn"); return; }
+    try {
+      const dataUrl = await compressImage(file);
+      photoDraft[kind] = dataUrl;
+      img.src = dataUrl;
+      preview.hidden = false;
+      addBtn.hidden = true;
+    } catch (e) {
+      toast("Couldn't process that photo.", "warn");
+    }
+  });
+
+  removeBtn.addEventListener("click", () => {
+    photoDraft[kind] = null;
+    input.value = "";
+    preview.hidden = true;
+    addBtn.hidden = false;
+  });
+}
+
+function resetPhotoPicker(prefix, kind) {
+  photoDraft[kind] = null;
+  $(`#${prefix}PhotoInput`).value = "";
+  $(`#${prefix}PhotoPreview`).hidden = true;
+  $(`#${prefix}PhotoBtn`).hidden = false;
+}
+
+/* ============================================================
+   FORMS
+   ============================================================ */
+function bindCardForm(formId, kind, prefix) {
+  $(formId).addEventListener("submit", ev => {
+    ev.preventDefault();
+    const f = ev.currentTarget;
+    // Guard against double/triple taps (common on a slow connection): ignore
+    // any submit that arrives while the previous one is still being handled.
+    if (f.dataset.submitting === "1") return;
+    f.dataset.submitting = "1";
+    const submitBtn = f.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.disabled = true;
+
+    // Note: use f.elements.* — form.name resolves to the form's own name attribute.
+    const el = f.elements;
+    const entry = {
+      id: uid(),
+      name: el.name.value.trim(),
+      price: Math.max(0, parseFloat(el.price.value) || 0),
+      qty: Math.max(1, parseInt(el.qty.value, 10) || 1),
+      date: el.date.value || todayISO(),
+      notes: el.notes.value.trim(),
+      photo: photoDraft[kind] || null
+    };
+    if (!entry.name) {
+      toast("Give the card a name first.", "warn");
+      f.dataset.submitting = "0";
+      if (submitBtn) submitBtn.disabled = false;
+      return;
+    }
+
+    // try/finally guarantees the button unlocks even if something in here
+    // throws — a stuck-disabled button was worse than the double-tap bug
+    // it was meant to prevent.
+    try {
+      state[kind].push(entry);
+      persist();
+      renderAll();
+      f.reset();
+      el.date.value = todayISO();
+      el.qty.value = 1;
+      resetPhotoPicker(prefix, kind);
+      el.name.focus();
+      toast(`${kind === "sales" ? "Sale" : "Purchase"} added — ${money(lineTotal(entry))}.`);
+    } finally {
+      // Small delay before re-enabling, so a rapid extra tap right after
+      // submitting can't sneak through as a second entry.
+    setTimeout(() => {
+      f.dataset.submitting = "0";
+      if (submitBtn) submitBtn.disabled = false;
+    }, 400);
+    }
+  });
+}
+
+function bindSupplyForm() {
+  $("#formSupplies").addEventListener("submit", ev => {
+    ev.preventDefault();
+    const f = ev.currentTarget;
+    if (f.dataset.submitting === "1") return;
+    f.dataset.submitting = "1";
+    const submitBtn = f.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.disabled = true;
+
+    const el = f.elements;
+    const entry = {
+      id: uid(),
+      name: el.name.value.trim(),
+      type: el.type.value,
+      price: Math.max(0, parseFloat(el.price.value) || 0),
+      date: el.date.value || todayISO()
+    };
+    if (!entry.name) {
+      toast("Give the item a name first.", "warn");
+      f.dataset.submitting = "0";
+      if (submitBtn) submitBtn.disabled = false;
+      return;
+    }
+
+    try {
+      state.supplies.push(entry);
+      persist();
+      renderAll();
+      f.reset();
+      el.date.value = todayISO();
+      el.name.focus();
+      toast(`Supply added — ${money(entry.price)}.`);
+    } finally {
+      setTimeout(() => {
+        f.dataset.submitting = "0";
+        if (submitBtn) submitBtn.disabled = false;
+      }, 400);
+    }
+  });
+}
+
+/* ============================================================
+   TABS + RANGE SWITCHING
+   ============================================================ */
+function bindTabs() {
+  $$(".seg[data-tab]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      $$(".seg[data-tab]").forEach(b => { b.classList.remove("active"); b.setAttribute("aria-selected", "false"); });
+      btn.classList.add("active"); btn.setAttribute("aria-selected", "true");
+      $$(".tab-panel").forEach(p => { p.hidden = p.dataset.panel !== btn.dataset.tab; });
+    });
+  });
+
+  $$(".seg[data-range]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      $$(".seg[data-range]").forEach(b => { b.classList.remove("active"); b.setAttribute("aria-selected", "false"); });
+      btn.classList.add("active"); btn.setAttribute("aria-selected", "true");
+      range = btn.dataset.range;
+      renderChart();
+    });
+  });
+}
+
+/* ============================================================
+   DATA MANAGEMENT — export, import, clear
+   ============================================================ */
+function download(filename, text, mime) {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+const stamp = () => todayISO();
+
+function csvCell(v) {
+  const s = String(v ?? "");
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function exportCsv() {
+  if (!state.purchases.length && !state.sales.length && !state.supplies.length) {
+    toast("Nothing to export yet.", "warn"); return;
+  }
+  // Note: photos aren't included in CSV — they're raw image data, not spreadsheet-friendly.
+  // Export to JSON instead if you want photos to travel with the entries.
+  const head = ["Type", "Name", "Category", "Date", "Quantity", "Unit price", "Line total", "Notes", "Has Photo"];
+  const rows = [head];
+
+  state.purchases.forEach(e => rows.push(["Purchase", e.name, "Card", e.date, e.qty, Number(e.price).toFixed(2), lineTotal(e).toFixed(2), e.notes || "", e.photo ? "Yes" : "No"]));
+  state.sales.forEach(e     => rows.push(["Sale", e.name, "Card", e.date, e.qty, Number(e.price).toFixed(2), lineTotal(e).toFixed(2), e.notes || "", e.photo ? "Yes" : "No"]));
+  state.supplies.forEach(e  => rows.push(["Supply", e.name, e.type || "Miscellaneous", e.date, 1, Number(e.price).toFixed(2), Number(e.price).toFixed(2), "", ""]));
+
+  const t = totals();
+  rows.push([]);
+  rows.push(["Summary", "", "", "", "", "", "", "", ""]);
+  rows.push(["Total card purchases", "", "", "", "", "", t.purchases.toFixed(2), "", ""]);
+  rows.push(["Total card sales", "", "", "", "", "", t.sales.toFixed(2), "", ""]);
+  rows.push(["Total supplies", "", "", "", "", "", t.supplies.toFixed(2), "", ""]);
+  rows.push(["Profit / loss", "", "", "", "", "", t.net.toFixed(2), "", ""]);
+
+  download(`card-show-ledger-${stamp()}.csv`, rows.map(r => r.map(csvCell).join(",")).join("\n"), "text/csv;charset=utf-8");
+  toast("CSV exported.");
+}
+
+function exportJson() {
+  const payload = { app: "card-show-ledger", version: 1, exportedAt: new Date().toISOString(), ...state };
+  download(`card-show-ledger-${stamp()}.json`, JSON.stringify(payload, null, 2), "application/json");
+  toast("JSON exported.");
+}
+
+function importJson(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    let parsed;
+    try { parsed = JSON.parse(reader.result); }
+    catch (e) { toast("That file isn't valid JSON.", "warn"); return; }
+
+    if (!parsed || (!Array.isArray(parsed.purchases) && !Array.isArray(parsed.sales) && !Array.isArray(parsed.supplies))) {
+      toast("No ledger data found in that file.", "warn"); return;
+    }
+
+    const incoming = {
+      purchases: (parsed.purchases || []).map(e => ({ ...e, id: e.id || uid() })),
+      sales:     (parsed.sales || []).map(e => ({ ...e, id: e.id || uid() })),
+      supplies:  (parsed.supplies || []).map(e => ({ ...e, id: e.id || uid() }))
+    };
+    const count = incoming.purchases.length + incoming.sales.length + incoming.supplies.length;
+    const hasData = state.purchases.length + state.sales.length + state.supplies.length > 0;
+
+    if (hasData) {
+      const replace = confirm(
+        `Found ${count} entries.\n\nOK = replace everything currently in the ledger.\nCancel = add them alongside what's already here.`
+      );
+      if (replace) state = incoming;
+      else {
+        state.purchases = state.purchases.concat(incoming.purchases);
+        state.sales     = state.sales.concat(incoming.sales);
+        state.supplies  = state.supplies.concat(incoming.supplies);
+      }
+    } else {
+      state = incoming;
+    }
+
+    persist();
+    renderAll();
+    toast(`Imported ${count} entr${count === 1 ? "y" : "ies"}.`);
+  };
+  reader.onerror = () => toast("Couldn't read that file.", "warn");
+  reader.readAsText(file);
+}
+
+function clearAll() {
+  const count = state.purchases.length + state.sales.length + state.supplies.length;
+  if (!count) { toast("The ledger is already empty.", "warn"); return; }
+  if (!confirm(`Delete all ${count} entries? This can't be undone.\n\nExport a backup first if you want to keep them.`)) return;
+
+  state = { purchases: [], sales: [], supplies: [] };
+  Store.wipe();
+  persist();
+  renderAll();
+  toast("Ledger cleared.");
+}
+
+function bindDataButtons() {
+  $("#btnCsv").addEventListener("click", exportCsv);
+  $("#btnJson").addEventListener("click", exportJson);
+  $("#btnClear").addEventListener("click", clearAll);
+  $("#btnImport").addEventListener("click", () => $("#fileInput").click());
+  $("#fileInput").addEventListener("change", ev => {
+    const file = ev.target.files[0];
+    if (file) importJson(file);
+    ev.target.value = ""; // allow re-importing the same file
+  });
+}
+
+/* ============================================================
+   RENDER + BOOT
+   ============================================================ */
+function renderAll() {
+  renderTotals();
+  renderCardTable("purchases");
+  renderCardTable("sales");
+  renderSupplyTable();
+  renderStats();
+  // Chart rendering depends on the Chart.js library loading from the CDN,
+  // which can fail on a weak show-floor connection. Isolate it so a chart
+  // failure never breaks the rest of the page (forms, tables, totals).
+  try {
+    renderChart();
+  } catch (e) {
+    console.error("Chart render failed:", e);
+  }
+}
+
+function init() {
+  loadState();
+
+  // Default every date field to today
+  ["#pDate", "#sDate", "#uDate"].forEach(sel => { $(sel).value = todayISO(); });
+
+  bindCardForm("#formPurchases", "purchases", "p");
+  bindCardForm("#formSales", "sales", "s");
+  bindPhotoPicker("p", "purchases");
+  bindPhotoPicker("s", "sales");
+  bindSupplyForm();
+  bindTabs();
+  bindDataButtons();
+  renderAll();
+
+  if (!Store.persistent) {
+    $("#storageNote").textContent =
+      "This preview can't write to local storage — download the file and open it directly to keep your data.";
+  }
+}
+
+document.addEventListener("DOMContentLoaded", init);
+</script>
+</body>
+</html>
